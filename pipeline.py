@@ -1,78 +1,55 @@
 import pandas as pd
 from solution import add_virtual_column
 
+def parse_number(s: pd.Series) -> pd.Series:
+    cleaned = (s.astype('string')
+                 .str.replace(r'[\s\u00a0]', '', regex=True)
+                 .str.replace(',', '.', regex=False))
+    return pd.to_numeric(cleaned, errors='coerce')
+
 def run_pipeline():
-    #Wczytanie surowych danych
-    raw_df = pd.read_csv('sales.csv')
+
+    raw_df = pd.read_csv('sales.csv', sep=',', dtype=str, encoding='utf-8-sig')
     raw_df.columns = raw_df.columns.str.strip()
 
     # ------------------------------------------------------------------------------------------------------------------
-    #1. Odfiltrowanie wierszy technicznych, duplikatów oraz wierszy z błędami wymagającymi decyzji biznesowej:
-    # - Wiersze techniczne: nagłówek w środku pliku (wiersz 751) oraz podsumowanie 'TOTAL' (wiersz 1508)
-    # - Dokładne duplikaty wierszy (wiersze: 307, 826, 971, 1246, 1412)
-
-    is_valid_row = ~raw_df['Order ID'].isin(['Order ID', 'TOTAL'])
+    # Odfiltrowanie wierszy technicznych, duplikatów
+    is_not_technical_row = ~raw_df['Order ID'].str.strip().str.upper().isin(['ORDER ID', 'TOTAL'])
     is_not_duplicate = ~raw_df.duplicated()
 
-    #2. Odfiltrowanie wierszy błędami wymagającymi decyzji biznesowej:
-    # - Brakujące ceny jednostkowe (Unit Price is NaN): wiersze [612, 1104, 1356, 1484]
-    # - Ujemne ilości (Quantity < 0): wiersze [423, 517, 782, 1016, 1295, 1452]
+    stats = { 'technical': int((~is_not_technical_row).sum()), 'duplicates': int((~is_not_duplicate).sum())}
 
-    # Wstępne oczyszczenie do sprawdzenia braków i ujemnych wartości
-    temp_df = raw_df[is_valid_row & is_not_duplicate].copy()
-    temp_df['Unit Price_num'] = pd.to_numeric(
-        temp_df['Unit Price'].astype(str).str.replace(',', '.', regex=False).str.replace(' ', '', regex=False),
-        errors='coerce'
-    )
-    temp_df['Quantity_num'] = pd.to_numeric(
-        temp_df['Quantity'].astype(str).str.replace(' ', '', regex=False),
-        errors='coerce'
-    )
+    temp_df = raw_df[is_not_technical_row & is_not_duplicate].copy()
 
-    is_valid_price = temp_df['Unit Price_num'].notna()
-    is_positive_qty = temp_df['Quantity_num'] > 0
+    # Standardize region names to clean the data for calculations.
+    temp_df['region'] = temp_df['Region'].str.strip().str.title()
+    # Replace commas with dots, remove spaces, and convert to numeric format
+    temp_df['unit_price'] = parse_number(temp_df['Unit Price'])
+    temp_df['quantity'] = parse_number(temp_df['Quantity'])
+    # ... and filling missing values with 0.0.
+    temp_df['discount'] = parse_number(temp_df['Discount']).fillna(0.0)
+
+    # Filtering out rows where 'Unit Price' is NaN
+    is_valid_price = temp_df['unit_price'].notna()
+
+    # Keep only rows where Quantity >
+    is_positive_qty = temp_df['quantity'] > 0
 
     clean_df = temp_df[is_valid_price & is_positive_qty].copy()
 
-    #-------------------------------------------------------------------------------------------------------------------
-
-    #3. Standaryzacja nazw regionów cleans the data so it can be used for calculations
-    clean_df['Region'] = clean_df['Region'].str.strip().str.title()
-
-    #-------------------------------------------------------------------------------------------------------------------
-    #zamiana przecinków na kropki, usunięcie spacji i konwersja na numeryczną
-    clean_df['Quantity'] = pd.to_numeric(
-        clean_df['Quantity'].astype(str).str.replace(' ', '', regex=False),
-        errors='coerce'
-    )
-    #zamiana przecinków na kropki, usunięcie spacji i konwersja na numeryczną
-    clean_df['Unit Price'] = pd.to_numeric(
-        clean_df['Unit Price'].astype(str).str.replace(',', '.', regex=False).str.replace(' ', '', regex=False),
-        errors='coerce'
-    )
-    #zamiana przecinków na kropki, usunięcie spacji i konwersja numeryczna z uzupełnieniem do 0.0. It is empty when there is no discount
-    clean_df['Discount'] = pd.to_numeric(
-        clean_df['Discount'].fillna('0').astype(str).str.replace(',', '.', regex=False).str.replace(' ', '',
-                                                                                                    regex=False),
-        errors='coerce'
-    ).fillna(0.0)
+    stats['bad_price_only'] = int((~is_valid_price & is_positive_qty).sum())
+    stats['bad_qty_only'] = int((is_valid_price & ~is_positive_qty).sum())
+    stats['both_bad'] = int((~is_valid_price & ~is_positive_qty).sum())
 
     #-------------------------------------------------------------------------------------------------------------------
-    # Przygotowanie nazw kolumn pod wymogi funkcji add_virtual_column
-    # 4. Przekazujemy tylko te kolumny, które mają poprawne nazwy (tylko litery i podkreślenia),
-    # aby funkcja nie odrzuciła ramki z powodu kolumn typu 'Order ID' czy 'Order Date' ze spacjami.
-    calc_df = clean_df[['Region', 'Quantity', 'Unit Price', 'Discount']].rename(columns={
-        'Region': 'region',
-        'Quantity': 'quantity',
-        'Unit Price': 'unit_price',
-        'Discount': 'discount'
-    }).copy()
-
+    # We only pass columns with correct names to ensure the function does not reject
+    # the DataFrame due to columns like 'Order ID' or 'Order Date', which contain spaces.
     # revenue: quantity * unit_price - discount
-    calc_df = add_virtual_column(calc_df, "quantity * unit_price", "subtotal")
-    calc_df = add_virtual_column(calc_df, "subtotal - discount", "revenue")
+    calc_df = add_virtual_column(clean_df[['region', 'quantity', 'unit_price', 'discount']],
+                              "quantity * unit_price - discount", "revenue")
 
-    # agregacja
+
+    # agregation
     revenue_by_region = (
         calc_df.groupby('region', as_index=False)['revenue']
         .sum()
@@ -82,10 +59,9 @@ def run_pipeline():
 
     revenue_by_region['total_revenue'] = revenue_by_region['total_revenue'].round(2)
 
-    #-------------------------------------------------------------------------------------------------------------------
-    #Zapis  do revenue_by_region.csv
     revenue_by_region.to_csv('revenue_by_region.csv', index=False)
-    print(f"Przetworzono {len(clean_df)} z {len(raw_df)} wierszy. Zapisano revenue_by_region.csv.")
+    print(stats)
+    print(f"Procesed {len(clean_df)} out of {len(raw_df)} rows")
 
 
 if __name__ == '__main__':
