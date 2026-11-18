@@ -27,7 +27,7 @@ pytest -v
 | Data Issue | Impact / CSV Line Numbers | How It Is Handled in Code |
 | :--- | :--- | :--- |
 | **Technical rows (mid-file header and summary)** | Row **751** (repeated header) and row **1508** (`TOTAL`) | Filtered out during the creation of a new data copy (`clean_df`) using logical masks. |
-| **Exact row duplicates** | Rows including **306-307**, **825-826**, **970-971**, **1245-1246**, **1411-1412| Duplicate records were filtered out using `~raw_df.duplicated()` (keeping the first occurrence). |
-| **Missing unit prices (`Unit Price` is NaN)** | Rows **612**, **1104**, **1356**, **1484** | **Left for business decision.** The rows were filtered out to avoid distorting calculations. |
-| **Negative quantities (`Quantity < 0`)** | Rows **423**, **517**, **782**, **1016**, **1295**, **1452** | **Left for business decision.** The rows were filtered out to avoid distorting calculations. |
+| **Exact row duplicates** | 5 rows including **306-307**, **825-826**, **970-971**, **1245-1246**, **1411-1412| Duplicate records were filtered out using `~raw_df.duplicated()` (keeping the first occurrence). |
+| **Missing unit prices (`Unit Price` is NaN)** | 4 rows **612**, **1104**, **1356**, **1484** | **Left for business decision.** The rows were filtered out to avoid distorting calculations. |
+| **Negative quantities (`Quantity < 0`)** | 6 rows **423**, **517**, **782**, **1016**, **1295**, **1452** | **Left for business decision.** The rows were filtered out to avoid distorting calculations. |
 | **Number formatting (spaces in quantities, commas in prices)** | Rows with thousands separators in `Quantity` (e.g., `1 762`) and decimal commas in `Unit Price` (e.g., `59,00`) | Cleaned on the fly by removing spaces, replacing commas with dots, and casting to numeric types. |
